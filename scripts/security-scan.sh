@@ -1,24 +1,39 @@
-RESULT=$(opa eval \
---format json \
---data policies \
---input terraform/tfplan.json \
-"data.terraform.security.deny")
+#!/usr/bin/env bash
 
+set -euo pipefail
 
-echo $RESULT
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+TERRAFORM_DIR="${PROJECT_ROOT}/terraform"
+POLICY_DIR="${PROJECT_ROOT}/policies"
 
+echo "==== Terraform Init ===="
+terraform -chdir="${TERRAFORM_DIR}" init -input=false
 
-COUNT=$(echo $RESULT | jq '.result[0].expressions[0].value | length')
+echo "==== Terraform Plan ===="
+terraform -chdir="${TERRAFORM_DIR}" plan \
+  -input=false \
+  -out=tfplan
 
+echo "==== Terraform JSON Export ===="
+terraform -chdir="${TERRAFORM_DIR}" show -json tfplan \
+  > "${TERRAFORM_DIR}/tfplan.json"
 
-if [ "$COUNT" -gt 0 ]; then
+echo "==== OPA Security Scan ===="
 
-    echo "Security violations found!"
+VIOLATIONS="$(
+  opa eval \
+    --format raw \
+    --data "${POLICY_DIR}" \
+    --input "${TERRAFORM_DIR}/tfplan.json" \
+    'json.marshal(data.terraform.security.deny)'
+)"
 
-    exit 1
+echo "${VIOLATIONS}"
 
-else
-
-    echo "Security scan passed!"
-
+if [[ "${VIOLATIONS}" != "[]" ]]; then
+  echo "Security violations detected. Pipeline blocked."
+  exit 1
 fi
+
+echo "Security scan passed."
