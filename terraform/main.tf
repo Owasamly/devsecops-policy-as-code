@@ -34,15 +34,3 @@ resource "aws_s3_bucket_versioning" "versioning" {
 }
 
 
-resource "aws_s3_bucket_tagging" "tags" {
-
-  bucket = aws_s3_bucket.application_bucket.id
-
-
-  tags = {
-
-    Environment = "dev"
-
-  }
-
-}
