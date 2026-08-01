@@ -1,0 +1,11 @@
+# Terraform files
+
+.terraform/
+
+*.tfstate
+*.tfstate.*
+crash.log
+
+# Local environment
+
+.env
