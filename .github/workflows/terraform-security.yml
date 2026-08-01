@@ -1,42 +1,78 @@
 name: Terraform Security Pipeline
 
-
 on:
   push:
     branches:
       - main
-
   pull_request:
     branches:
       - main
 
 jobs:
-
   terraform-check:
-
     runs-on: ubuntu-latest
 
-
     steps:
-
       - name: Checkout repository
         uses: actions/checkout@v4
 
-
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.15.8"
 
+      - name: Setup OPA
+        run: |
+          curl -L \
+            -o opa \
+            https://openpolicyagent.org/downloads/latest/opa_linux_amd64_static
 
-      - name: Terraform Format Check
+          chmod +x opa
+          sudo mv opa /usr/local/bin/opa
+
+          opa version
+
+      - name: Terraform format check
         working-directory: terraform
         run: terraform fmt -check
 
-
-      - name: Terraform Init
+      - name: Terraform initialization
         working-directory: terraform
-        run: terraform init
+        run: terraform init -input=false
 
-
-      - name: Terraform Validate
+      - name: Terraform validation
         working-directory: terraform
         run: terraform validate
+
+      - name: Terraform plan
+        working-directory: terraform
+        run: |
+          terraform plan \
+            -refresh=false \
+            -input=false \
+            -out=tfplan
+
+      - name: Export Terraform plan as JSON
+        working-directory: terraform
+        run: terraform show -json tfplan > tfplan.json
+
+      - name: Run OPA security policies
+        run: |
+          VIOLATIONS="$(
+            opa eval \
+              --format raw \
+              --data policies \
+              --input terraform/tfplan.json \
+              'json.marshal(data.terraform.security.deny)'
+          )"
+
+          echo "Security-policy result:"
+          echo "${VIOLATIONS}"
+
+          if [ "${VIOLATIONS}" != "[]" ]; then
+            echo "::error title=Terraform security violations::${VIOLATIONS}"
+            echo "Security violations detected. Pipeline blocked."
+            exit 1
+          fi
+
+          echo "No security violations detected."
