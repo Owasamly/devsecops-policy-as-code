@@ -9,3 +9,9 @@ crash.log
 # Local environment
 
 .env
+
+# LocalStack
+localstack-data/
+
+#logs
+*.log
