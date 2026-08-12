@@ -1,0 +1,115 @@
+{
+  "secure_plan": {
+    "configuration": {
+      "root_module": {
+        "resources": [
+          {
+            "address": "aws_s3_bucket_server_side_encryption_configuration.application_data",
+            "expressions": {
+              "bucket": {
+                "references": ["aws_s3_bucket.application_data"]
+              }
+            },
+            "type": "aws_s3_bucket_server_side_encryption_configuration"
+          },
+          {
+            "address": "aws_s3_bucket_public_access_block.application_data",
+            "expressions": {
+              "bucket": {
+                "references": ["aws_s3_bucket.application_data"]
+              }
+            },
+            "type": "aws_s3_bucket_public_access_block"
+          },
+          {
+            "address": "aws_s3_bucket_versioning.application_data",
+            "expressions": {
+              "bucket": {
+                "references": ["aws_s3_bucket.application_data"]
+              }
+            },
+            "type": "aws_s3_bucket_versioning"
+          }
+        ]
+      }
+    },
+    "resource_changes": [
+      {
+        "address": "aws_s3_bucket.application_data",
+        "change": {
+          "actions": ["create"],
+          "after": {
+            "bucket": "secure-example",
+            "tags": {
+              "Environment": "test",
+              "ManagedBy": "Terraform",
+              "Owner": "Osama"
+            }
+          }
+        },
+        "type": "aws_s3_bucket"
+      },
+      {
+        "address": "aws_s3_bucket_server_side_encryption_configuration.application_data",
+        "change": {
+          "actions": ["create"],
+          "after": {
+            "rule": [
+              {
+                "apply_server_side_encryption_by_default": [
+                  {
+                    "sse_algorithm": "AES256"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "type": "aws_s3_bucket_server_side_encryption_configuration"
+      },
+      {
+        "address": "aws_s3_bucket_public_access_block.application_data",
+        "change": {
+          "actions": ["create"],
+          "after": {
+            "block_public_acls": true,
+            "block_public_policy": true,
+            "ignore_public_acls": true,
+            "restrict_public_buckets": true
+          }
+        },
+        "type": "aws_s3_bucket_public_access_block"
+      },
+      {
+        "address": "aws_s3_bucket_versioning.application_data",
+        "change": {
+          "actions": ["create"],
+          "after": {
+            "versioning_configuration": [
+              {
+                "status": "Enabled"
+              }
+            ]
+          }
+        },
+        "type": "aws_s3_bucket_versioning"
+      },
+      {
+        "address": "aws_security_group.application",
+        "change": {
+          "actions": ["create"],
+          "after": {
+            "ingress": [
+              {
+                "cidr_blocks": ["10.0.0.0/8"],
+                "from_port": 443,
+                "to_port": 443
+              }
+            ]
+          }
+        },
+        "type": "aws_security_group"
+      }
+    ]
+  }
+}

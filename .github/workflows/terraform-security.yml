@@ -1,78 +1,114 @@
-name: Terraform Security Pipeline
+name: Terraform Policy Gate
 
 on:
   push:
-    branches:
-      - main
+    branches: [main, master]
   pull_request:
-    branches:
-      - main
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  OPA_VERSION: 1.16.2
+  OPA_SHA256: 4ab4b89c131e6df3fed28b0b164083b6641ad67c86ab4c12d417ecfb93838ef1
+  TERRAFORM_VERSION: 1.15.8
 
 jobs:
-  terraform-check:
+  terraform-quality:
+    name: Terraform Format and Validation
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v4.0.1
         with:
-          terraform_version: "1.15.8"
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
 
-      - name: Setup OPA
+      - name: Check Terraform formatting
+        run: terraform -chdir=terraform fmt -check -recursive
+
+      - name: Initialize Terraform without a backend
+        run: terraform -chdir=terraform init -backend=false -input=false
+
+      - name: Validate Terraform configuration
+        run: terraform -chdir=terraform validate
+
+  opa-policy-tests:
+    name: OPA Unit and Negative Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install pinned OPA binary
         run: |
-          curl -L \
-            -o opa \
-            https://openpolicyagent.org/downloads/latest/opa_linux_amd64_static
+          curl --fail --location --silent --show-error \
+            --output opa \
+            "https://openpolicyagent.org/downloads/v${OPA_VERSION}/opa_linux_amd64_static"
+          echo "${OPA_SHA256}  opa" | sha256sum --check --strict
+          chmod +x opa
+          sudo mv opa /usr/local/bin/opa
+          opa version
 
+      - name: Check policy formatting and syntax
+        run: |
+          opa fmt --fail policies tests/opa
+          opa check --strict policies tests/opa
+
+      - name: Run policy unit tests
+        run: opa test policies tests/opa tests/fixtures -v
+
+      - name: Prove the secure fixture passes
+        run: |
+          test "$(jq '.secure_plan' tests/fixtures/secure-plan.json | \
+            opa eval --stdin-input --format raw --data policies \
+            'count(data.terraform.security.deny)')" -eq 0
+
+      - name: Prove the insecure fixture is blocked
+        run: |
+          test "$(jq '.insecure_plan' tests/fixtures/insecure-plan.json | \
+            opa eval --stdin-input --format raw --data policies \
+            'count(data.terraform.security.deny)')" -eq 5
+
+  terraform-policy-gate:
+    name: Terraform Plan Policy Gate
+    runs-on: ubuntu-latest
+    needs: [terraform-quality, opa-policy-tests]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v4.0.1
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Install pinned OPA binary
+        run: |
+          curl --fail --location --silent --show-error \
+            --output opa \
+            "https://openpolicyagent.org/downloads/v${OPA_VERSION}/opa_linux_amd64_static"
+          echo "${OPA_SHA256}  opa" | sha256sum --check --strict
           chmod +x opa
           sudo mv opa /usr/local/bin/opa
 
-          opa version
+      - name: Generate plan and enforce policies
+        run: ./scripts/security-scan.sh
 
-      - name: Terraform format check
-        working-directory: terraform
-        run: terraform fmt -check
-
-      - name: Terraform initialization
-        working-directory: terraform
-        run: terraform init -input=false
-
-      - name: Terraform validation
-        working-directory: terraform
-        run: terraform validate
-
-      - name: Terraform plan
-        working-directory: terraform
-        run: |
-          terraform plan \
-            -refresh=false \
-            -input=false \
-            -out=tfplan
-
-      - name: Export Terraform plan as JSON
-        working-directory: terraform
-        run: terraform show -json tfplan > tfplan.json
-
-      - name: Run OPA security policies
-        run: |
-          VIOLATIONS="$(
-            opa eval \
-              --format raw \
-              --data policies \
-              --input terraform/tfplan.json \
-              'json.marshal(data.terraform.security.deny)'
-          )"
-
-          echo "Security-policy result:"
-          echo "${VIOLATIONS}"
-
-          if [ "${VIOLATIONS}" != "[]" ]; then
-            echo "::error title=Terraform security violations::${VIOLATIONS}"
-            echo "Security violations detected. Pipeline blocked."
-            exit 1
-          fi
-
-          echo "No security violations detected."
+      - name: Upload policy evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: terraform-policy-evidence
+          path: |
+            .generated/tfplan.json
+            reports/policy-report.json
+          if-no-files-found: error
+          retention-days: 14

@@ -1,0 +1,41 @@
+{
+  "insecure_plan": {
+    "configuration": {
+      "root_module": {
+        "resources": []
+      }
+    },
+    "resource_changes": [
+      {
+        "address": "aws_s3_bucket.insecure",
+        "change": {
+          "actions": ["create"],
+          "after": {
+            "bucket": "insecure-example",
+            "tags": {
+              "Environment": "test",
+              "ManagedBy": "Terraform"
+            }
+          }
+        },
+        "type": "aws_s3_bucket"
+      },
+      {
+        "address": "aws_security_group.insecure",
+        "change": {
+          "actions": ["create"],
+          "after": {
+            "ingress": [
+              {
+                "cidr_blocks": ["0.0.0.0/0"],
+                "from_port": 22,
+                "to_port": 22
+              }
+            ]
+          }
+        },
+        "type": "aws_security_group"
+      }
+    ]
+  }
+}

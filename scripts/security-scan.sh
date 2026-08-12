@@ -6,34 +6,56 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 TERRAFORM_DIR="${PROJECT_ROOT}/terraform"
 POLICY_DIR="${PROJECT_ROOT}/policies"
+GENERATED_DIR="${PROJECT_ROOT}/.generated"
+REPORT_DIR="${PROJECT_ROOT}/reports"
+PLAN_FILE="${GENERATED_DIR}/tfplan"
+PLAN_JSON="${GENERATED_DIR}/tfplan.json"
+REPORT_JSON="${REPORT_DIR}/policy-report.json"
 
-echo "==== Terraform Init ===="
-terraform -chdir="${TERRAFORM_DIR}" init -input=false
+for command in terraform opa jq; do
+  if ! command -v "${command}" >/dev/null 2>&1; then
+    echo "Required command not found: ${command}" >&2
+    exit 127
+  fi
+done
 
-echo "==== Terraform Plan ===="
+mkdir -p "${GENERATED_DIR}" "${REPORT_DIR}"
+
+echo "[1/6] Checking Terraform formatting"
+terraform -chdir="${TERRAFORM_DIR}" fmt -check -recursive
+
+echo "[2/6] Initializing Terraform"
+terraform -chdir="${TERRAFORM_DIR}" init -backend=false -input=false
+
+echo "[3/6] Validating Terraform"
+terraform -chdir="${TERRAFORM_DIR}" validate
+
+echo "[4/6] Building an offline Terraform plan"
 terraform -chdir="${TERRAFORM_DIR}" plan \
+  -refresh=false \
   -input=false \
-  -out=tfplan
+  -out="${PLAN_FILE}"
 
-echo "==== Terraform JSON Export ===="
-terraform -chdir="${TERRAFORM_DIR}" show -json tfplan \
-  > "${TERRAFORM_DIR}/tfplan.json"
+echo "[5/6] Exporting the plan as JSON"
+terraform -chdir="${TERRAFORM_DIR}" show -json "${PLAN_FILE}" >"${PLAN_JSON}"
 
-echo "==== OPA Security Scan ===="
+echo "[6/6] Evaluating OPA policies"
+opa eval \
+  --format raw \
+  --data "${POLICY_DIR}" \
+  --input "${PLAN_JSON}" \
+  'json.marshal(data.terraform.security.deny)' >"${REPORT_JSON}"
 
-VIOLATIONS="$(
-  opa eval \
-    --format raw \
-    --data "${POLICY_DIR}" \
-    --input "${TERRAFORM_DIR}/tfplan.json" \
-    'json.marshal(data.terraform.security.deny)'
-)"
+violation_count="$(jq 'length' "${REPORT_JSON}")"
 
-echo "${VIOLATIONS}"
-
-if [[ "${VIOLATIONS}" != "[]" ]]; then
-  echo "Security violations detected. Pipeline blocked."
+if ((violation_count > 0)); then
+  echo
+  echo "Policy gate failed with ${violation_count} violation(s):"
+  jq -r '.[] | "- [\(.code)] \(.resource): \(.message)"' "${REPORT_JSON}"
   exit 1
 fi
 
-echo "Security scan passed."
+echo
+echo "Policy gate passed: no violations found."
+echo "Plan:   ${PLAN_JSON}"
+echo "Report: ${REPORT_JSON}"
