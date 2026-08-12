@@ -1,69 +1,73 @@
 package terraform.security
 
-# Every planned S3 bucket must have an encryption configuration resource.
-deny contains msg if {
-    bucket := input.resource_changes[_]
-    bucket.type == "aws_s3_bucket"
+import rego.v1
 
-    not encryption_configuration_exists
+required_tags := {"Environment", "ManagedBy", "Owner"}
 
-    msg := sprintf(
-        "S3 bucket %s has no encryption configuration",
-        [bucket.change.after.bucket]
-    )
+deny contains violation if {
+	some bucket in active_resource_changes
+	bucket.type == "aws_s3_bucket"
+	not valid_encryption_for(bucket.address)
+	violation := finding(
+		"S3_ENCRYPTION_REQUIRED",
+		bucket.address,
+		"S3 buckets require linked server-side encryption using AES256 or aws:kms",
+	)
 }
 
-encryption_configuration_exists if {
-    encryption := input.resource_changes[_]
-    encryption.type == "aws_s3_bucket_server_side_encryption_configuration"
-
-    algorithm := encryption.change.after.rule[0].apply_server_side_encryption_by_default[0].sse_algorithm
-    algorithm == "AES256"
+deny contains violation if {
+	some bucket in active_resource_changes
+	bucket.type == "aws_s3_bucket"
+	not valid_public_access_block_for(bucket.address)
+	violation := finding(
+		"S3_PUBLIC_ACCESS_BLOCK_REQUIRED",
+		bucket.address,
+		"S3 buckets must enable all four public-access-block settings",
+	)
 }
 
-# All four S3 public-access controls must be enabled.
-deny contains msg if {
-    resource := input.resource_changes[_]
-    resource.type == "aws_s3_bucket_public_access_block"
-
-    not resource.change.after.block_public_acls
-
-    msg := "S3 bucket must block public ACLs"
+deny contains violation if {
+	some bucket in active_resource_changes
+	bucket.type == "aws_s3_bucket"
+	not versioning_enabled_for(bucket.address)
+	violation := finding(
+		"S3_VERSIONING_REQUIRED",
+		bucket.address,
+		"S3 bucket versioning must be enabled",
+	)
 }
 
-deny contains msg if {
-    resource := input.resource_changes[_]
-    resource.type == "aws_s3_bucket_public_access_block"
-
-    not resource.change.after.block_public_policy
-
-    msg := "S3 bucket must block public bucket policies"
+deny contains violation if {
+	some bucket in active_resource_changes
+	bucket.type == "aws_s3_bucket"
+	tags := object.get(bucket.change.after, "tags", {})
+	some tag in required_tags
+	object.get(tags, tag, "") == ""
+	violation := finding(
+		"S3_REQUIRED_TAGS",
+		bucket.address,
+		sprintf("S3 bucket is missing required tag %q", [tag]),
+	)
 }
 
-deny contains msg if {
-    resource := input.resource_changes[_]
-    resource.type == "aws_s3_bucket_public_access_block"
-
-    not resource.change.after.ignore_public_acls
-
-    msg := "S3 bucket must ignore public ACLs"
+valid_encryption_for(bucket_address) if {
+	some resource in linked_resources(bucket_address, "aws_s3_bucket_server_side_encryption_configuration")
+	some rule in object.get(resource.change.after, "rule", [])
+	some defaults in object.get(rule, "apply_server_side_encryption_by_default", [])
+	object.get(defaults, "sse_algorithm", "") in {"AES256", "aws:kms"}
 }
 
-deny contains msg if {
-    resource := input.resource_changes[_]
-    resource.type == "aws_s3_bucket_public_access_block"
-
-    not resource.change.after.restrict_public_buckets
-
-    msg := "S3 bucket must restrict public buckets"
+valid_public_access_block_for(bucket_address) if {
+	some resource in linked_resources(bucket_address, "aws_s3_bucket_public_access_block")
+	after := resource.change.after
+	after.block_public_acls == true
+	after.block_public_policy == true
+	after.ignore_public_acls == true
+	after.restrict_public_buckets == true
 }
 
-# Versioning must be enabled.
-deny contains msg if {
-    resource := input.resource_changes[_]
-    resource.type == "aws_s3_bucket_versioning"
-
-    resource.change.after.versioning_configuration[0].status != "Enabled"
-
-    msg := "S3 bucket versioning must be enabled"
+versioning_enabled_for(bucket_address) if {
+	some resource in linked_resources(bucket_address, "aws_s3_bucket_versioning")
+	some configuration in object.get(resource.change.after, "versioning_configuration", [])
+	configuration.status == "Enabled"
 }

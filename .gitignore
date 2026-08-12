@@ -1,17 +1,22 @@
-# Terraform files
-
-.terraform/
-
+# Terraform working files and state
+**/.terraform/
 *.tfstate
 *.tfstate.*
+*.tfplan
 crash.log
+crash.*.log
 
-# Local environment
+# Generated policy evidence
+.generated/
+reports/
 
+# Local services and environment
+localstack-data/
 .env
 
-# LocalStack
-localstack-data/
-
-#logs
+# Editors, operating systems, and logs
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
 *.log

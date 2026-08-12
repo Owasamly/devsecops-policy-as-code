@@ -1,17 +1,19 @@
 services:
-
   localstack:
     image: localstack/localstack:3.0.0
-    container_name: localstack-devsecops
-
+    container_name: devsecops-policy-localstack
     ports:
-      - "5566:4566"
-
+      - "127.0.0.1:4566:4566"
     environment:
-      - SERVICES=s3,iam
-      - DEBUG=1
-      - PERSISTENCE=1
-
+      SERVICES: s3,iam,ec2
+      DEBUG: "0"
+      PERSISTENCE: "1"
     volumes:
-      - "./localstack-data:/var/lib/localstack"
-      - "/var/run/docker.sock:/var/run/docker.sock"
+      - ./localstack-data:/var/lib/localstack
+    healthcheck:
+      test:
+        ["CMD", "curl", "--fail", "http://localhost:4566/_localstack/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s

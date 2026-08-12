@@ -1,26 +1,16 @@
 provider "aws" {
-
-  region = "us-east-1"
-
+  region     = var.aws_region
   access_key = "test"
-
   secret_key = "test"
 
-
   endpoints {
-
-    s3 = "http://localhost:5566"
-
-    iam = "http://localhost:5566"
-
+    ec2 = var.localstack_endpoint
+    iam = var.localstack_endpoint
+    s3  = var.localstack_endpoint
   }
 
-  s3_use_path_style = true
-
+  s3_use_path_style           = true
   skip_credentials_validation = true
-
-  skip_metadata_api_check = true
-
-  skip_requesting_account_id = true
-
+  skip_metadata_api_check     = true
+  skip_requesting_account_id  = true
 }
